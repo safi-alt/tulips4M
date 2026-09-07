@@ -1,0 +1,1121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tulips for M</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="A garden of tulips that grows and blooms with your hands.">
+<meta property="og:title" content="Tulips for M">
+<meta property="og:description" content="A garden of tulips that grows and blooms with your hands.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Great+Vibes&display=swap" rel="stylesheet">
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #12080c;
+    overflow: hidden;
+    height: 100%;
+  }
+  #webcamVideo {
+    position: absolute;
+    bottom: 16px;
+    right: 16px;
+    width: min(22vw, 280px);
+    transform: scaleX(-1);
+    border-radius: 10px;
+    z-index: 2;
+    opacity: 0.92;
+    box-shadow: 0 8px 32px rgba(0,0,0,.45);
+    display: none;
+  }
+  #flowerCanvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 1;
+    cursor: grab;
+  }
+  #handOverlay {
+    position: absolute;
+    bottom: 16px;
+    right: 16px;
+    width: min(22vw, 280px);
+    z-index: 3;
+    pointer-events: none;
+    display: none;
+  }
+  #title {
+    position: absolute;
+    top: 28px;
+    left: 0;
+    right: 0;
+    z-index: 4;
+    text-align: center;
+    pointer-events: none;
+    transition: opacity 1.2s ease;
+  }
+  #title h1 {
+    margin: 0;
+    font-family: "Great Vibes", cursive;
+    font-weight: 400;
+    font-size: clamp(42px, 7vw, 84px);
+    color: #f7dce3;
+    text-shadow: 0 2px 28px rgba(180, 40, 70, 0.45);
+    letter-spacing: 0.02em;
+  }
+  #title p {
+    margin: 6px 0 0;
+    font-family: "Cormorant Garamond", serif;
+    font-size: clamp(14px, 2vw, 18px);
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: rgba(247, 220, 227, 0.72);
+  }
+  #dedication {
+    position: absolute;
+    bottom: 28px;
+    left: 0;
+    right: 0;
+    z-index: 4;
+    text-align: center;
+    pointer-events: none;
+    font-family: "Cormorant Garamond", serif;
+    font-style: italic;
+    font-size: clamp(15px, 2.2vw, 22px);
+    color: rgba(247, 220, 227, 0.0);
+    transition: color 1.6s ease;
+  }
+  #dedication.visible {
+    color: rgba(247, 220, 227, 0.78);
+  }
+  #handsBtn {
+    pointer-events: auto;
+    position: absolute;
+    left: 50%;
+    bottom: 72px;
+    transform: translateX(-50%);
+    z-index: 5;
+    font-family: "Cormorant Garamond", serif;
+    font-size: 16px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: #12080c;
+    background: #f7dce3;
+    border: none;
+    border-radius: 999px;
+    padding: 10px 22px;
+    cursor: pointer;
+    box-shadow: 0 6px 24px rgba(0,0,0,.28);
+  }
+  #handsBtn:hover { background: #fff; }
+  #hud {
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    z-index: 2;
+    color: #f7dce3;
+    font: 12px/1.6 monospace;
+    background: rgba(18,8,12,.62);
+    padding: 8px 12px;
+    border-radius: 6px;
+    white-space: pre;
+    user-select: none;
+    display: none;
+  }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.166.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.166.0/examples/jsm/",
+    "animejs": "https://cdn.jsdelivr.net/npm/animejs@3.2.2/lib/anime.es.js"
+  }
+}
+</script>
+</head>
+<body>
+
+<video id="webcamVideo" autoplay muted playsinline></video>
+<canvas id="handOverlay"></canvas>
+<canvas id="flowerCanvas"></canvas>
+<div id="title">
+  <h1>Tulips for M</h1>
+  <p>left hand grows · right hand blooms</p>
+</div>
+<button id="handsBtn" type="button">use your hands</button>
+<div id="dedication">grown by hand, just for you</div>
+<div id="hud"></div>
+
+<script type="module">
+import * as THREE from 'three';
+import anime from 'animejs';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass }     from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { HandLandmarker, FilesetResolver } from
+  'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs';
+
+/* =========================================================================
+   TWEAKABLE PARAMETERS
+   ========================================================================= */
+const PARAMS = {
+  field: {
+    seed: 11,
+    heartScale: 0.152,      // overall size of the planted heart
+    spacing: 0.34,          // tulip grid spacing inside the heart
+    jitter: 0.11,
+    heightMin: 1.05,
+    heightMax: 1.58,
+    leanDeg: 6,
+    growFromCenter: 0.42,   // outer stems start later
+  },
+
+  stem: {
+    radius: 0.018,
+    segments: 10,
+    color: 0x2f7a45,
+    curveJitter: 0.16,
+  },
+
+  leaves: {
+    count: 2,
+    length: 0.78,
+    maxWidth: 0.13,
+    lengthSegments: 10,
+    widthSegments: 5,
+    color: 0x2a6b3a,
+    archDeg: 48,
+  },
+
+  flowers: {
+    scale: 1.28,
+    bloomFromCenter: 0.55,
+    nodBudDeg: 28,          // hanging bud
+    nodOpenDeg: 4,          // nearly upright in bloom
+  },
+
+  petals: {
+    count: 6,               // tulip tepals: 3 outer + 3 inner
+    length: 0.34,
+    maxWidth: 0.18,
+    baseOffset: 0.006,
+    curlExponent: 1.2,
+    lengthSegments: 14,
+    widthSegments: 10,
+    innerScale: 0.9,        // inner tepals slightly smaller
+    innerTiltBias: 0.78,    // inner stay a bit more closed
+  },
+
+  stamens: {
+    count: 6,
+    length: 0.11,
+    radius: 0.0035,
+    color: 0xf2d36b,
+    antherColor: 0x1a120c,
+    antherSize: 0.007,
+    pistilColor: 0xd8c48a,
+  },
+
+  bloomPoses: {
+    bud:    { petalTilt: 6,  recurve: -22, wrap: 78, stamen: 0    },
+    lift:   { petalTilt: 16, recurve: -6,  wrap: 52, stamen: 0    },
+    cup:    { petalTilt: 30, recurve: 10,  wrap: 34, stamen: 0.35 },
+    full:   { petalTilt: 46, recurve: 22,  wrap: 20, stamen: 1    },
+    settle: { petalTilt: 42, recurve: 18,  wrap: 24, stamen: 0.96 },
+  },
+
+  colors: [
+    { color: 0xc81d25, emissive: 0x4a080c },  // classic red
+    { color: 0xe23a5a, emissive: 0x4a1420 },  // rose
+    { color: 0x8e1a2a, emissive: 0x2e0710 },  // burgundy
+    { color: 0xf3c2cf, emissive: 0x3a2228 },  // blush
+    { color: 0xf6e6df, emissive: 0x322828 },  // cream
+    { color: 0xd12b6a, emissive: 0x3a1020 },  // magenta
+    { color: 0xe85d4c, emissive: 0x3a1510 },  // coral
+  ],
+
+  interaction: {
+    pinchRatioMin: 0.35,
+    pinchRatioMax: 1.5,
+    growFullAt: 0.75,
+    smoothingSeconds: 0.09,
+    swapHands: false,
+  },
+
+  debug: {
+    enabled: true,
+    growValue: 1.0,
+    bloomCycleSeconds: 11,
+  },
+
+  glow: {
+    strength: 0.72,
+    radius: 0.48,
+    threshold: 0.18,
+  },
+
+  camera: {
+    fov: 38,
+    position: [0, 9.4, 7.4],
+    lookAt: [0, 0.15, 0.1],
+  },
+};
+
+/* =========================================================================
+   BLOOM TIMELINE — cup-shaped tulip open, not a lycoris recurve
+   ========================================================================= */
+const BLOOM_TIMELINE_MS = 1800;
+const poses = PARAMS.bloomPoses;
+const bloomState = { ...poses.bud };
+
+const bloomTimeline = anime.timeline({ autoplay: false, easing: 'easeInOutQuad' });
+bloomTimeline
+  .add({ targets: bloomState,
+         petalTilt: poses.lift.petalTilt, recurve: poses.lift.recurve,
+         wrap: poses.lift.wrap,
+         duration: 320, easing: 'easeInOutCubic' }, 120)
+  .add({ targets: bloomState,
+         petalTilt: poses.cup.petalTilt, recurve: poses.cup.recurve,
+         wrap: poses.cup.wrap, stamen: poses.cup.stamen,
+         duration: 380, easing: 'easeInOutQuad' }, 440)
+  .add({ targets: bloomState,
+         petalTilt: poses.full.petalTilt, recurve: poses.full.recurve,
+         wrap: poses.full.wrap, stamen: poses.full.stamen,
+         duration: 520, easing: 'easeOutCubic' }, 820)
+  .add({ targets: bloomState,
+         petalTilt: poses.settle.petalTilt, recurve: poses.settle.recurve,
+         wrap: poses.settle.wrap, stamen: poses.settle.stamen,
+         duration: 280, easing: 'easeInOutSine' }, 1400)
+  .add({ targets: bloomState, stamen: poses.settle.stamen, duration: 120 }, 1680);
+
+function bloomStageName(bloomAmount) {
+  const virtualTime = bloomAmount * BLOOM_TIMELINE_MS;
+  if (virtualTime < 120)  return 'tight bud';
+  if (virtualTime < 440)  return 'petals lifting';
+  if (virtualTime < 820)  return 'opening into a cup';
+  if (virtualTime < 1400) return 'full tulip';
+  return 'settled bloom';
+}
+
+function makeSeededRandom(seed) {
+  let state = seed >>> 0;
+  return function seededRandom() {
+    state |= 0; state = state + 0x6D2B79F5 | 0;
+    let temp = Math.imul(state ^ state >>> 15, 1 | state);
+    temp = temp + Math.imul(temp ^ temp >>> 7, 61 | temp) ^ temp;
+    return ((temp ^ temp >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+/* =========================================================================
+   SCENE
+   ========================================================================= */
+const flowerCanvas = document.getElementById('flowerCanvas');
+const renderer = new THREE.WebGLRenderer({ canvas: flowerCanvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+
+const scene = new THREE.Scene();
+const bgColor = new THREE.Color(0x12080c);
+scene.background = bgColor;
+scene.fog = new THREE.FogExp2(0x12080c, 0.038);
+
+const camera = new THREE.PerspectiveCamera(
+  PARAMS.camera.fov, window.innerWidth / window.innerHeight, 0.1, 100);
+camera.position.set(...PARAMS.camera.position);
+camera.lookAt(new THREE.Vector3(...PARAMS.camera.lookAt));
+
+const orbitControls = new OrbitControls(camera, flowerCanvas);
+orbitControls.target.set(...PARAMS.camera.lookAt);
+orbitControls.enableDamping = true;
+orbitControls.dampingFactor = 0.08;
+orbitControls.autoRotate = true;
+orbitControls.autoRotateSpeed = 0.42;
+orbitControls.minDistance = 5;
+orbitControls.maxDistance = 18;
+orbitControls.minPolarAngle = Math.PI * 0.18;
+orbitControls.maxPolarAngle = Math.PI * 0.42;
+
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloomPass = new UnrealBloomPass(
+  new THREE.Vector2(window.innerWidth, window.innerHeight),
+  PARAMS.glow.strength, PARAMS.glow.radius, PARAMS.glow.threshold);
+composer.addPass(bloomPass);
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  composer.setSize(window.innerWidth, window.innerHeight);
+});
+
+scene.add(new THREE.AmbientLight(0xffe8de, 0.42));
+scene.add(new THREE.HemisphereLight(0x3a2030, 0x0c0808, 0.55));
+const keyLight = new THREE.DirectionalLight(0xffe4d6, 1.35);
+keyLight.position.set(3.2, 7, 5.5);
+scene.add(keyLight);
+const rimLight = new THREE.DirectionalLight(0xff6b8a, 0.35);
+rimLight.position.set(-4, 2.5, -5);
+scene.add(rimLight);
+
+const garden = new THREE.Group();
+scene.add(garden);
+
+/* =========================================================================
+   HEART SHAPE HELPERS
+   ========================================================================= */
+function heartXZ(t, scale) {
+  const s = Math.sin(t);
+  const c = Math.cos(t);
+  const x = 16 * s * s * s;
+  const y = 13 * c - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
+  // point of the heart toward the camera (+Z)
+  return new THREE.Vector3(x * scale, 0, -y * scale);
+}
+
+function makeHeartShape(scale) {
+  const shape = new THREE.Shape();
+  const steps = 96;
+  for (let i = 0; i <= steps; i++) {
+    const t = (i / steps) * Math.PI * 2;
+    const p = heartXZ(t, scale);
+    // Shape lives in XY; rotateX(-90°) maps shapeY to -worldZ, so store -p.z
+    if (i === 0) shape.moveTo(p.x, -p.z);
+    else shape.lineTo(p.x, -p.z);
+  }
+  return shape;
+}
+
+{
+  const soilGeo = new THREE.ShapeGeometry(makeHeartShape(PARAMS.field.heartScale * 1.12), 64);
+  soilGeo.rotateX(-Math.PI / 2);
+  const soil = new THREE.Mesh(soilGeo, new THREE.MeshStandardMaterial({
+    color: 0x1c0c12,
+    roughness: 1,
+    metalness: 0,
+    emissive: 0x2a1018,
+    emissiveIntensity: 0.55,
+  }));
+  soil.position.y = -0.03;
+  garden.add(soil);
+
+  const outlinePts = [];
+  for (let i = 0; i <= 96; i++) {
+    const p = heartXZ((i / 96) * Math.PI * 2, PARAMS.field.heartScale * 1.12);
+    p.y = 0.015;
+    outlinePts.push(p);
+  }
+  const outlineCurve = new THREE.CatmullRomCurve3(outlinePts, true);
+  const outline = new THREE.Mesh(
+    new THREE.TubeGeometry(outlineCurve, 160, 0.022, 8, true),
+    new THREE.MeshBasicMaterial({
+      color: 0xd4788c,
+      transparent: true,
+      opacity: 0.55,
+    })
+  );
+  garden.add(outline);
+}
+
+/* =========================================================================
+   PETAL / LEAF GEOMETRY
+   ========================================================================= */
+function tulipWidthProfile(lengthT) {
+  const t = THREE.MathUtils.clamp(lengthT, 0, 1);
+  return Math.max(0.1, Math.pow(Math.sin(Math.PI * Math.pow(t, 0.7)), 0.62));
+}
+
+function createShadedBladeGeometry(lengthSegments, widthSegments, throatBoost) {
+  const geometry = new THREE.BufferGeometry();
+  const vertexCount = (lengthSegments + 1) * (widthSegments + 1);
+  geometry.setAttribute('position',
+    new THREE.BufferAttribute(new Float32Array(vertexCount * 3), 3));
+  const shadeColors = new Float32Array(vertexCount * 3);
+  let colorIndex = 0;
+  for (let row = 0; row <= lengthSegments; row++) {
+    const lengthT = row / lengthSegments;
+    for (let col = 0; col <= widthSegments; col++) {
+      const widthT = col / widthSegments - 0.5;
+      const edgeness = Math.abs(widthT) * 2;
+      const throat = Math.pow(Math.max(0, 1 - lengthT / 0.28), 1.5);
+      const rib = Math.exp(-Math.pow(widthT / 0.12, 2));
+      const tipShade = 1 - 0.22 * Math.pow(lengthT, 1.8);
+      shadeColors[colorIndex++] = tipShade * (1 - 0.12 * edgeness)
+        * (1 + 0.18 * rib + throatBoost * throat);
+      shadeColors[colorIndex++] = Math.pow(tipShade, 1.15) * (1 - 0.28 * edgeness)
+        * (1 + 0.35 * rib + throatBoost * 1.8 * throat);
+      shadeColors[colorIndex++] = Math.pow(tipShade, 1.1) * (1 - 0.22 * edgeness)
+        * (1 + 0.22 * rib + throatBoost * 1.2 * throat);
+    }
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(shadeColors, 3));
+  const indices = [];
+  for (let row = 0; row < lengthSegments; row++) {
+    for (let col = 0; col < widthSegments; col++) {
+      const a =  row      * (widthSegments + 1) + col;
+      const b = (row + 1) * (widthSegments + 1) + col;
+      indices.push(a, b, a + 1, b, b + 1, a + 1);
+    }
+  }
+  geometry.setIndex(indices);
+  return geometry;
+}
+
+function fillTulipPetal(geometry, recurveDeg, wrapDeg) {
+  const conf = PARAMS.petals;
+  const positions = geometry.attributes.position.array;
+  const recurveRad = THREE.MathUtils.degToRad(recurveDeg);
+  const cupAmount = THREE.MathUtils.degToRad(wrapDeg) * 0.22;
+  const stepLen = conf.length / conf.lengthSegments;
+
+  let writeIndex = 0;
+  let spineY = 0, spineZ = 0, spineAngle = 0;
+
+  for (let row = 0; row <= conf.lengthSegments; row++) {
+    const lengthT = row / conf.lengthSegments;
+    const halfWidth = conf.maxWidth * tulipWidthProfile(lengthT) * 0.5;
+    const cup = Math.sin(lengthT * Math.PI) * cupAmount;
+
+    for (let col = 0; col <= conf.widthSegments; col++) {
+      const widthT = col / conf.widthSegments - 0.5;
+      const x = widthT * 2 * halfWidth;
+      const zCup = (widthT * widthT) * 4 * halfWidth * Math.sin(cup);
+      positions[writeIndex++] = x;
+      positions[writeIndex++] = spineY;
+      positions[writeIndex++] = spineZ + zCup;
+    }
+    spineAngle = recurveRad * Math.pow(lengthT, conf.curlExponent);
+    spineY += Math.cos(spineAngle) * stepLen;
+    spineZ += Math.sin(spineAngle) * stepLen;
+  }
+  geometry.attributes.position.needsUpdate = true;
+  geometry.computeVertexNormals();
+}
+
+function fillLeaf(geometry, archDeg) {
+  const conf = PARAMS.leaves;
+  const positions = geometry.attributes.position.array;
+  const archRad = THREE.MathUtils.degToRad(archDeg);
+  const stepLen = conf.length / conf.lengthSegments;
+  let writeIndex = 0;
+  let spineY = 0, spineZ = 0, spineAngle = 0;
+
+  for (let row = 0; row <= conf.lengthSegments; row++) {
+    const lengthT = row / conf.lengthSegments;
+    const widthProfile = Math.sin(Math.PI * Math.min(1, lengthT * 1.05)) ** 0.7;
+    const halfWidth = conf.maxWidth * widthProfile * 0.5;
+    for (let col = 0; col <= conf.widthSegments; col++) {
+      const widthT = col / conf.widthSegments - 0.5;
+      const fold = (1 - Math.cos(widthT * Math.PI)) * 0.012;
+      positions[writeIndex++] = widthT * 2 * halfWidth;
+      positions[writeIndex++] = spineY;
+      positions[writeIndex++] = spineZ - fold;
+    }
+    spineAngle = archRad * lengthT;
+    spineY += Math.cos(spineAngle) * stepLen;
+    spineZ += Math.sin(spineAngle) * stepLen;
+  }
+  geometry.attributes.position.needsUpdate = true;
+  geometry.computeVertexNormals();
+}
+
+const PETAL_STEPS = 20;
+const petalLibrary = [];
+{
+  const sampleState = { ...poses.bud };
+  const sampler = anime.timeline({ autoplay: false, easing: 'easeInOutQuad' });
+  sampler
+    .add({ targets: sampleState,
+           petalTilt: poses.lift.petalTilt, recurve: poses.lift.recurve,
+           wrap: poses.lift.wrap, duration: 320 }, 120)
+    .add({ targets: sampleState,
+           petalTilt: poses.cup.petalTilt, recurve: poses.cup.recurve,
+           wrap: poses.cup.wrap, duration: 380 }, 440)
+    .add({ targets: sampleState,
+           petalTilt: poses.full.petalTilt, recurve: poses.full.recurve,
+           wrap: poses.full.wrap, duration: 520 }, 820)
+    .add({ targets: sampleState,
+           petalTilt: poses.settle.petalTilt, recurve: poses.settle.recurve,
+           wrap: poses.settle.wrap, duration: 280 }, 1400);
+
+  for (let step = 0; step <= PETAL_STEPS; step++) {
+    sampler.seek((step / PETAL_STEPS) * BLOOM_TIMELINE_MS);
+    const geometry = createShadedBladeGeometry(
+      PARAMS.petals.lengthSegments, PARAMS.petals.widthSegments, 1.6);
+    fillTulipPetal(geometry, sampleState.recurve, sampleState.wrap);
+    petalLibrary.push({
+      geometry,
+      petalTilt: sampleState.petalTilt,
+      wrap: sampleState.wrap,
+      recurve: sampleState.recurve,
+    });
+  }
+}
+
+const leafGeometry = createShadedBladeGeometry(
+  PARAMS.leaves.lengthSegments, PARAMS.leaves.widthSegments, 0.4);
+fillLeaf(leafGeometry, PARAMS.leaves.archDeg);
+
+const leafMaterial = new THREE.MeshStandardMaterial({
+  color: PARAMS.leaves.color,
+  roughness: 0.82,
+  metalness: 0,
+  side: THREE.DoubleSide,
+  vertexColors: true,
+});
+const stemMaterial = new THREE.MeshStandardMaterial({
+  color: PARAMS.stem.color,
+  roughness: 0.78,
+  metalness: 0,
+});
+const petalMaterials = PARAMS.colors.map((swatch) => new THREE.MeshStandardMaterial({
+  color: swatch.color,
+  emissive: swatch.emissive,
+  emissiveIntensity: 0.55,
+  roughness: 0.48,
+  metalness: 0.02,
+  side: THREE.DoubleSide,
+  vertexColors: true,
+}));
+
+const stamenMaterial = new THREE.MeshBasicMaterial({ color: PARAMS.stamens.color });
+const antherMaterial = new THREE.MeshBasicMaterial({ color: PARAMS.stamens.antherColor });
+const pistilMaterial = new THREE.MeshStandardMaterial({
+  color: PARAMS.stamens.pistilColor,
+  roughness: 0.6,
+  metalness: 0,
+});
+
+const stamenCurve = new THREE.QuadraticBezierCurve3(
+  new THREE.Vector3(0, 0, 0),
+  new THREE.Vector3(0, PARAMS.stamens.length * 0.55, 0.012),
+  new THREE.Vector3(0, PARAMS.stamens.length, 0.004)
+);
+const stamenGeometry = new THREE.TubeGeometry(stamenCurve, 8, PARAMS.stamens.radius, 5, false);
+const antherGeometry = new THREE.SphereGeometry(PARAMS.stamens.antherSize, 6, 5);
+const pistilGeometry = new THREE.CylinderGeometry(0.004, 0.006, 0.13, 6);
+const stigmaGeometry = new THREE.SphereGeometry(0.007, 6, 5);
+
+/* =========================================================================
+   PLANT THE GARDEN
+   ========================================================================= */
+const fieldRandom = makeSeededRandom(PARAMS.field.seed);
+const tulips = [];
+
+function makeStemCurve(height, lean, phase) {
+  const points = [];
+  const segs = PARAMS.stem.segments;
+  for (let i = 0; i <= segs; i++) {
+    const t = i / segs;
+    const sway = Math.sin(t * Math.PI) * PARAMS.stem.curveJitter;
+    points.push(new THREE.Vector3(
+      Math.sin(phase) * sway * height * 0.12 + lean.x * t * t,
+      t * height,
+      Math.cos(phase) * sway * height * 0.12 + lean.z * t * t
+    ));
+  }
+  return new THREE.CatmullRomCurve3(points);
+}
+
+function pointInPolygon(x, z, polygon) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].x, zi = polygon[i].z;
+    const xj = polygon[j].x, zj = polygon[j].z;
+    const intersect = ((zi > z) !== (zj > z)) &&
+      (x < (xj - xi) * (z - zi) / ((zj - zi) || 1e-12) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+const heartPolygon = [];
+for (let i = 0; i < 96; i++) {
+  heartPolygon.push(heartXZ((i / 96) * Math.PI * 2, PARAMS.field.heartScale));
+}
+let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+for (const p of heartPolygon) {
+  minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+  minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z);
+}
+
+const placements = [];
+for (let x = minX; x <= maxX; x += PARAMS.field.spacing) {
+  const rowOffset = (Math.round((x - minX) / PARAMS.field.spacing) % 2) * PARAMS.field.spacing * 0.5;
+  for (let z = minZ + rowOffset; z <= maxZ; z += PARAMS.field.spacing) {
+    const jx = x + (fieldRandom() - 0.5) * PARAMS.field.jitter;
+    const jz = z + (fieldRandom() - 0.5) * PARAMS.field.jitter;
+    if (pointInPolygon(jx, jz, heartPolygon)) {
+      placements.push(new THREE.Vector3(jx, 0, jz));
+    }
+  }
+}
+
+let maxRadius = 0;
+for (const p of placements) {
+  maxRadius = Math.max(maxRadius, Math.hypot(p.x, p.z));
+}
+
+for (const position of placements) {
+  const plant = new THREE.Group();
+  plant.position.copy(position);
+  garden.add(plant);
+
+  const height = THREE.MathUtils.lerp(
+    PARAMS.field.heightMin, PARAMS.field.heightMax, fieldRandom());
+  const leanRad = THREE.MathUtils.degToRad(PARAMS.field.leanDeg);
+  const leanYaw = fieldRandom() * Math.PI * 2;
+  const lean = new THREE.Vector3(
+    Math.sin(leanYaw) * Math.sin(leanRad) * height,
+    0,
+    Math.cos(leanYaw) * Math.sin(leanRad) * height
+  );
+  const stemCurve = makeStemCurve(height, lean, fieldRandom() * Math.PI * 2);
+  const stemGeo = new THREE.TubeGeometry(
+    stemCurve, PARAMS.stem.segments * 2, PARAMS.stem.radius, 6, false);
+  const stemMesh = new THREE.Mesh(stemGeo, stemMaterial);
+  plant.add(stemMesh);
+
+  const tip = stemCurve.getPoint(1);
+  const tipTan = stemCurve.getTangent(1);
+  const flowerGroup = new THREE.Group();
+  flowerGroup.position.copy(tip);
+  flowerGroup.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tipTan.normalize());
+  flowerGroup.scale.setScalar(0.0001);
+  plant.add(flowerGroup);
+
+  const nodGroup = new THREE.Group();
+  nodGroup.rotation.order = 'XYZ';
+  flowerGroup.add(nodGroup);
+
+  const colorIndex = Math.floor(fieldRandom() * petalMaterials.length);
+  const petalMat = petalMaterials[colorIndex];
+  const petalPivots = [];
+  const petalMeshes = [];
+  for (let petalIndex = 0; petalIndex < PARAMS.petals.count; petalIndex++) {
+    const pivot = new THREE.Group();
+    pivot.rotation.order = 'YXZ';
+    const isInner = petalIndex % 2 === 1;
+    pivot.userData.baseAzimuth = (petalIndex / PARAMS.petals.count) * Math.PI * 2;
+    pivot.userData.tiltScale = isInner ? PARAMS.petals.innerTiltBias : 1;
+    pivot.userData.sizeScale = isInner ? PARAMS.petals.innerScale : 1;
+    pivot.rotation.y = pivot.userData.baseAzimuth;
+    const mesh = new THREE.Mesh(petalLibrary[0].geometry, petalMat);
+    mesh.position.y = PARAMS.petals.baseOffset;
+    mesh.scale.setScalar(pivot.userData.sizeScale);
+    pivot.add(mesh);
+    nodGroup.add(pivot);
+    petalPivots.push(pivot);
+    petalMeshes.push(mesh);
+  }
+
+  const throat = new THREE.Group();
+  nodGroup.add(throat);
+  const pistil = new THREE.Mesh(pistilGeometry, pistilMaterial);
+  pistil.position.y = 0.065;
+  throat.add(pistil);
+  for (let lobe = 0; lobe < 3; lobe++) {
+    const stigma = new THREE.Mesh(stigmaGeometry, pistilMaterial);
+    const a = (lobe / 3) * Math.PI * 2;
+    stigma.position.set(Math.cos(a) * 0.008, 0.132, Math.sin(a) * 0.008);
+    throat.add(stigma);
+  }
+
+  const stamenEntries = [];
+  for (let i = 0; i < PARAMS.stamens.count; i++) {
+    const pivot = new THREE.Group();
+    pivot.rotation.y = (i / PARAMS.stamens.count) * Math.PI * 2;
+    pivot.rotation.x = THREE.MathUtils.degToRad(10);
+    const filament = new THREE.Mesh(stamenGeometry, stamenMaterial);
+    const anther = new THREE.Mesh(antherGeometry, antherMaterial);
+    anther.position.y = PARAMS.stamens.length;
+    anther.scale.set(0.7, 1.6, 0.7);
+    pivot.add(filament);
+    pivot.add(anther);
+    throat.add(pivot);
+    stamenEntries.push({ pivot, filament, anther });
+  }
+
+  const leafPivots = [];
+  for (let i = 0; i < PARAMS.leaves.count; i++) {
+    const leafPivot = new THREE.Group();
+    leafPivot.position.y = 0.08 + fieldRandom() * 0.12;
+    leafPivot.rotation.order = 'YXZ';
+    leafPivot.rotation.y = (i / PARAMS.leaves.count) * Math.PI * 2
+      + (fieldRandom() - 0.5) * 0.7 + leanYaw;
+    leafPivot.rotation.x = THREE.MathUtils.degToRad(18 + fieldRandom() * 16);
+    const leafMesh = new THREE.Mesh(leafGeometry, leafMaterial);
+    leafPivot.add(leafMesh);
+    plant.add(leafPivot);
+    leafPivots.push(leafPivot);
+  }
+
+  const radius = Math.hypot(position.x, position.z);
+  const radiusT = maxRadius > 1e-5 ? radius / maxRadius : 0;
+  tulips.push({
+    plant,
+    stemMesh,
+    stemIndexCount: stemGeo.index.count,
+    flowerGroup,
+    nodGroup,
+    petalPivots,
+    petalMeshes,
+    stamenEntries,
+    leafPivots,
+    throat,
+    radiusT,
+    windPhase: fieldRandom() * Math.PI * 2,
+    height,
+  });
+}
+
+/* =========================================================================
+   GROW / BLOOM
+   ========================================================================= */
+function staggeredFromCenter(amount, radiusT, spread) {
+  const delay = radiusT * spread;
+  return THREE.MathUtils.clamp((amount - delay) / Math.max(1e-4, 1 - delay), 0, 1);
+}
+
+function applyGrow(growAmount) {
+  for (const tulip of tulips) {
+    const local = staggeredFromCenter(growAmount, tulip.radiusT, PARAMS.field.growFromCenter);
+    const stemT = THREE.MathUtils.clamp(local / 0.72, 0, 1);
+    tulip.stemMesh.visible = stemT > 0.001;
+    const quadCount = tulip.stemIndexCount / 6;
+    tulip.stemMesh.geometry.setDrawRange(0, Math.ceil(stemT * quadCount) * 6);
+
+    const leafT = THREE.MathUtils.clamp((local - 0.18) / 0.5, 0, 1);
+    const leafScale = Math.max(0.0001, leafT);
+    for (const leafPivot of tulip.leafPivots) {
+      leafPivot.scale.set(leafScale, leafScale, leafScale);
+      leafPivot.visible = leafT > 0.02;
+    }
+
+    const flowerT = THREE.MathUtils.clamp((local - 0.62) / 0.38, 0, 1);
+    const headScale = Math.max(0.0001, flowerT * PARAMS.flowers.scale);
+    tulip.flowerGroup.scale.setScalar(headScale);
+  }
+}
+
+function applyBloom(globalBloom) {
+  for (const tulip of tulips) {
+    const localBloom = staggeredFromCenter(
+      globalBloom, tulip.radiusT, PARAMS.flowers.bloomFromCenter);
+    bloomTimeline.seek(localBloom * BLOOM_TIMELINE_MS);
+
+    const step = Math.round(localBloom * PETAL_STEPS);
+    const pose = petalLibrary[step];
+    const petalTiltRad = THREE.MathUtils.degToRad(pose.petalTilt);
+
+    for (let i = 0; i < tulip.petalMeshes.length; i++) {
+      tulip.petalMeshes[i].geometry = pose.geometry;
+      const pivot = tulip.petalPivots[i];
+      pivot.rotation.x = petalTiltRad * pivot.userData.tiltScale;
+    }
+
+    const nodDeg = THREE.MathUtils.lerp(
+      PARAMS.flowers.nodBudDeg, PARAMS.flowers.nodOpenDeg, localBloom);
+    tulip.nodGroup.rotation.x = THREE.MathUtils.degToRad(nodDeg);
+
+    const stamenT = bloomState.stamen;
+    const stamenScale = Math.max(0.0001, stamenT);
+    tulip.throat.visible = stamenT > 0.04;
+    for (const entry of tulip.stamenEntries) {
+      entry.filament.scale.setScalar(stamenScale);
+      entry.anther.scale.set(0.7 * stamenScale, 1.6 * stamenScale, 0.7 * stamenScale);
+      entry.filament.visible = stamenT > 0.06;
+      entry.anther.visible = stamenT > 0.12;
+    }
+  }
+}
+
+/* =========================================================================
+   HAND TRACKING
+   ========================================================================= */
+const webcamVideo = document.getElementById('webcamVideo');
+let handLandmarker = null;
+let trackerStatus = 'waiting for camera…';
+let webcamStarted = false;
+let handsDetected = 0;
+let leftHandSeen = false;
+let rightHandSeen = false;
+const rawControl = { grow: 0, bloom: 0 };
+const smoothControl = { grow: 0, bloom: 0 };
+
+async function initWebcamAndHands() {
+  if (webcamStarted) return;
+  webcamStarted = true;
+  trackerStatus = 'loading…';
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: 1280, height: 720 } });
+    webcamVideo.srcObject = stream;
+    await webcamVideo.play().catch(() => {});
+  } catch (mediaError) {
+    webcamStarted = false;
+    debugEnabled = true;
+    handsBtn.style.display = 'block';
+    webcamVideo.style.display = 'none';
+    document.getElementById('handOverlay').style.display = 'none';
+    trackerStatus = 'no camera (' + (mediaError?.name || 'error') + ')';
+    console.warn('webcam unavailable — staying in debug mode', mediaError);
+    return;
+  }
+  try {
+    const filesetResolver = await FilesetResolver.forVisionTasks(
+      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
+    const trackerOptions = {
+      baseOptions: {
+        modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+        delegate: 'GPU',
+      },
+      numHands: 2,
+      runningMode: 'VIDEO',
+    };
+    try {
+      handLandmarker = await HandLandmarker.createFromOptions(filesetResolver, trackerOptions);
+    } catch (gpuError) {
+      console.warn('GPU delegate failed, retrying with CPU', gpuError);
+      trackerOptions.baseOptions.delegate = 'CPU';
+      handLandmarker = await HandLandmarker.createFromOptions(filesetResolver, trackerOptions);
+    }
+    trackerStatus = 'ready (' + trackerOptions.baseOptions.delegate + ')';
+  } catch (handError) {
+    trackerStatus = 'FAILED: ' + (handError?.message || handError).toString().slice(0, 60);
+    console.error('hand tracker failed to load — staying in debug mode', handError);
+  }
+}
+
+function computePinchValue(landmarks) {
+  const thumbTip = landmarks[4];
+  const indexTip = landmarks[8];
+  const wrist = landmarks[0];
+  const middleKnuckle = landmarks[9];
+  const pinchGap = Math.hypot(thumbTip.x - indexTip.x, thumbTip.y - indexTip.y);
+  const handScale = Math.hypot(
+    wrist.x - middleKnuckle.x, wrist.y - middleKnuckle.y);
+  if (handScale < 1e-5) return 0;
+  const pinchRatio = pinchGap / handScale;
+  const { pinchRatioMin, pinchRatioMax } = PARAMS.interaction;
+  return THREE.MathUtils.clamp(
+    (pinchRatio - pinchRatioMin) / (pinchRatioMax - pinchRatioMin), 0, 1);
+}
+
+const overlayCanvas = document.getElementById('handOverlay');
+const overlayContext = overlayCanvas.getContext('2d');
+const HAND_CONNECTIONS = [
+  [0,1],[1,2],[2,3],[3,4],
+  [0,5],[5,6],[6,7],[7,8],
+  [5,9],[9,10],[10,11],[11,12],
+  [9,13],[13,14],[14,15],[15,16],
+  [13,17],[17,18],[18,19],[19,20],
+  [0,17],
+];
+
+function drawHandOverlay(handsFound, handednessList) {
+  if (webcamVideo.videoWidth === 0) return;
+  const overlayWidth = 640;
+  const overlayHeight = Math.round(
+    overlayWidth * webcamVideo.videoHeight / webcamVideo.videoWidth);
+  if (overlayCanvas.width !== overlayWidth ||
+      overlayCanvas.height !== overlayHeight) {
+    overlayCanvas.width = overlayWidth;
+    overlayCanvas.height = overlayHeight;
+  }
+  overlayContext.clearRect(0, 0, overlayWidth, overlayHeight);
+
+  for (let handIndex = 0; handIndex < handsFound.length; handIndex++) {
+    const landmarks = handsFound[handIndex];
+    const reportedLabel = handednessList[handIndex]?.[0]?.categoryName || '';
+    let isPhysicalLeft = reportedLabel === 'Right';
+    if (PARAMS.interaction.swapHands) isPhysicalLeft = !isPhysicalLeft;
+    const handColor = isPhysicalLeft ? '#43e97b' : '#ff4d6d';
+    const toScreenX = (landmark) => (1 - landmark.x) * overlayWidth;
+    const toScreenY = (landmark) => landmark.y * overlayHeight;
+
+    overlayContext.globalAlpha = 0.75;
+    overlayContext.strokeStyle = handColor;
+    overlayContext.lineWidth = 2;
+    overlayContext.beginPath();
+    for (const [fromIdx, toIdx] of HAND_CONNECTIONS) {
+      overlayContext.moveTo(toScreenX(landmarks[fromIdx]), toScreenY(landmarks[fromIdx]));
+      overlayContext.lineTo(toScreenX(landmarks[toIdx]), toScreenY(landmarks[toIdx]));
+    }
+    overlayContext.stroke();
+
+    overlayContext.fillStyle = handColor;
+    for (const landmark of landmarks) {
+      overlayContext.beginPath();
+      overlayContext.arc(toScreenX(landmark), toScreenY(landmark), 3, 0, Math.PI * 2);
+      overlayContext.fill();
+    }
+
+    const thumbTip = landmarks[4];
+    const indexTip = landmarks[8];
+    const pinchValue = computePinchValue(landmarks);
+    overlayContext.globalAlpha = 1;
+    overlayContext.strokeStyle = '#ffcf5e';
+    overlayContext.lineWidth = 4;
+    overlayContext.beginPath();
+    overlayContext.moveTo(toScreenX(thumbTip), toScreenY(thumbTip));
+    overlayContext.lineTo(toScreenX(indexTip), toScreenY(indexTip));
+    overlayContext.stroke();
+    const midX = (toScreenX(thumbTip) + toScreenX(indexTip)) / 2;
+    const midY = (toScreenY(thumbTip) + toScreenY(indexTip)) / 2 - 12;
+    overlayContext.font = 'bold 16px monospace';
+    overlayContext.textAlign = 'center';
+    overlayContext.fillStyle = '#fff';
+    overlayContext.fillText(
+      `${isPhysicalLeft ? 'grow' : 'bloom'} ${pinchValue.toFixed(2)}`, midX, midY);
+  }
+}
+
+function readHands() {
+  if (!handLandmarker || webcamVideo.readyState < 2) {
+    handsDetected = 0; leftHandSeen = false; rightHandSeen = false; return;
+  }
+  let result;
+  try {
+    result = handLandmarker.detectForVideo(webcamVideo, performance.now());
+  } catch (detectError) {
+    trackerStatus = 'detect error: ' + (detectError?.message || '').slice(0, 40);
+    handsDetected = 0; leftHandSeen = false; rightHandSeen = false; return;
+  }
+  const handsFound = result.landmarks || [];
+  const handednessList = result.handedness || result.handednesses || [];
+  handsDetected = handsFound.length;
+  leftHandSeen = false;
+  rightHandSeen = false;
+  drawHandOverlay(handsFound, handednessList);
+  if (handsFound.length === 0) return;
+
+  for (let handIndex = 0; handIndex < handsFound.length; handIndex++) {
+    const landmarks = handsFound[handIndex];
+    const pinchValue = computePinchValue(landmarks);
+    const reportedLabel = handednessList[handIndex]?.[0]?.categoryName || '';
+    let isPhysicalLeft = reportedLabel === 'Right';
+    if (PARAMS.interaction.swapHands) isPhysicalLeft = !isPhysicalLeft;
+
+    if (isPhysicalLeft) {
+      rawControl.grow = pinchValue;
+      leftHandSeen = true;
+    } else {
+      rawControl.bloom = pinchValue;
+      rightHandSeen = true;
+    }
+  }
+}
+
+/* =========================================================================
+   MAIN LOOP
+   ========================================================================= */
+const hud = document.getElementById('hud');
+const titleEl = document.getElementById('title');
+const dedicationEl = document.getElementById('dedication');
+const handsBtn = document.getElementById('handsBtn');
+let debugEnabled = PARAMS.debug.enabled;
+let hudVisible = false;
+let pinnedBloom = null;
+
+window.PARAMS = PARAMS;
+window.scenery = { scene, camera, garden, tulips, orbitControls };
+
+function setLiveHands() {
+  debugEnabled = false;
+  handsBtn.style.display = 'none';
+  webcamVideo.style.display = 'block';
+  overlayCanvas.style.display = 'block';
+  initWebcamAndHands();
+}
+
+handsBtn.addEventListener('click', (event) => {
+  event.stopPropagation();
+  setLiveHands();
+});
+
+window.addEventListener('keydown', (keyEvent) => {
+  if (keyEvent.key === 'd' || keyEvent.key === 'D') {
+    if (debugEnabled) {
+      setLiveHands();
+    } else {
+      debugEnabled = true;
+      handsBtn.style.display = 'block';
+    }
+  }
+  if (keyEvent.key === 'h' || keyEvent.key === 'H') {
+    hudVisible = !hudVisible;
+    hud.style.display = hudVisible ? 'block' : 'none';
+  }
+  if (keyEvent.key === '1') pinnedBloom = 0;
+  if (keyEvent.key === '2') pinnedBloom = 0.45;
+  if (keyEvent.key === '3') pinnedBloom = 1;
+  if (keyEvent.key === '0') pinnedBloom = null;
+});
+
+const clock = new THREE.Clock();
+let lastHandRead = 0;
+
+function animate() {
+  requestAnimationFrame(animate);
+  const deltaSeconds = Math.min(clock.getDelta(), 0.5);
+  const elapsedSeconds = clock.getElapsedTime();
+
+  if (elapsedSeconds - lastHandRead > 1 / 30) {
+    readHands();
+    lastHandRead = elapsedSeconds;
+  }
+
+  let targetGrow, targetBloom;
+  if (debugEnabled) {
+    targetGrow = PARAMS.debug.growValue;
+    targetBloom = pinnedBloom !== null ? pinnedBloom :
+      0.5 - 0.5 * Math.cos(
+        (elapsedSeconds / PARAMS.debug.bloomCycleSeconds) * Math.PI * 2);
+  } else {
+    targetGrow = THREE.MathUtils.clamp(
+      rawControl.grow / PARAMS.interaction.growFullAt, 0, 1);
+    targetBloom = rawControl.bloom;
+  }
+
+  const alpha = 1 - Math.exp(-deltaSeconds / PARAMS.interaction.smoothingSeconds);
+  smoothControl.grow += (targetGrow - smoothControl.grow) * alpha;
+  smoothControl.bloom += (targetBloom - smoothControl.bloom) * alpha;
+
+  applyGrow(smoothControl.grow);
+  applyBloom(smoothControl.bloom);
+
+  for (const tulip of tulips) {
+    tulip.plant.rotation.z = Math.sin(elapsedSeconds * 0.55 + tulip.windPhase) * 0.03;
+    tulip.plant.rotation.x = Math.sin(elapsedSeconds * 0.4 + tulip.windPhase) * 0.012;
+  }
+
+  if (elapsedSeconds > 8) titleEl.style.opacity = '0.35';
+  if (smoothControl.bloom > 0.72 && smoothControl.grow > 0.85) {
+    dedicationEl.classList.add('visible');
+  } else {
+    dedicationEl.classList.remove('visible');
+  }
+
+  orbitControls.update();
+  composer.render();
+
+  if (hudVisible) {
+    hud.textContent =
+      `mode:  ${debugEnabled ? (pinnedBloom !== null ? 'DEBUG (pinned)' : 'DEBUG (auto-cycle)') : 'LIVE HANDS'}` +
+      `   [D] toggle  [H] hide  [1/2/3] pin  [0] cycle  drag=orbit\n` +
+      `grow:  ${smoothControl.grow.toFixed(2)}  (left hand)\n` +
+      `bloom: ${smoothControl.bloom.toFixed(2)}  (right hand — ${bloomStageName(smoothControl.bloom)})\n` +
+      `tulips: ${tulips.length}   hands: L${leftHandSeen ? '✓' : '·'} R${rightHandSeen ? '✓' : '·'}  tracker: ${trackerStatus}`;
+  }
+}
+animate();
+</script>
+</body>
+</html>
